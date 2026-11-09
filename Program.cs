@@ -19,6 +19,15 @@ var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOption
 if (string.IsNullOrWhiteSpace(jwt.Key) || Encoding.UTF8.GetByteCount(jwt.Key) < 32)
     throw new InvalidOperationException("Configuração inválida: 'Jwt:Key' deve ter pelo menos 32 bytes.");
 
+// Fora de Development, a chave de exemplo do appsettings.json nunca pode ser usada.
+if (!builder.Environment.IsDevelopment() &&
+    jwt.Key.StartsWith("TROQUE-ESTA-CHAVE", StringComparison.Ordinal))
+{
+    throw new InvalidOperationException(
+        "Configuração inválida: 'Jwt:Key' ainda é o valor de exemplo. " +
+        "Defina a variável de ambiente Jwt__Key com um segredo forte (mínimo de 32 caracteres).");
+}
+
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<RegistrationOptions>(builder.Configuration.GetSection(RegistrationOptions.SectionName));
 builder.Services.Configure<SeedAdminOptions>(builder.Configuration.GetSection(SeedAdminOptions.SectionName));
@@ -180,12 +189,12 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger
     app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "ScrumRetroApi v1"));
 }
 
-if (!app.Environment.IsDevelopment())
-    app.UseHttpsRedirection();
-
 app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
+// Health check para o pinger/Render. AllowAnonymous porque o FallbackPolicy exige JWT em todo o resto.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+
 app.MapControllers();
 
 app.Run();
