@@ -246,7 +246,7 @@ public sealed class UserService(AppDbContext db, ICurrentUser current) : IUserSe
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = $"%{search.Trim()}%";
-            query = query.Where(u => EF.Functions.Like(u.FullName, term) || EF.Functions.Like(u.Email, term));
+            query = query.Where(u => EF.Functions.ILike(u.FullName, term) || EF.Functions.ILike(u.Email, term));
         }
 
         if (role.HasValue)

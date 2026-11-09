@@ -40,9 +40,9 @@ public sealed class CompanyService(AppDbContext db, ICurrentUser current) : ICom
             var term = $"%{search.Trim()}%";
             var cnpjTerm = $"%{Cnpj.Normalize(search)}%";
             query = query.Where(c =>
-                EF.Functions.Like(c.Name, term) ||
-                (c.LegalName != null && EF.Functions.Like(c.LegalName, term)) ||
-                EF.Functions.Like(c.Cnpj, cnpjTerm));
+                EF.Functions.ILike(c.Name, term) ||
+                (c.LegalName != null && EF.Functions.ILike(c.LegalName, term)) ||
+                EF.Functions.ILike(c.Cnpj, cnpjTerm));
         }
 
         // Ordena ANTES de projetar para o record (o EF não traduz OrderBy sobre membros de construtor).
@@ -131,8 +131,8 @@ public sealed class CompanyService(AppDbContext db, ICurrentUser current) : ICom
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = $"%{search.Trim()}%";
-            query = query.Where(u => EF.Functions.Like(u.FullName, term) ||
-                                     (u.Department != null && EF.Functions.Like(u.Department, term)));
+            query = query.Where(u => EF.Functions.ILike(u.FullName, term) ||
+                                     (u.Department != null && EF.Functions.ILike(u.Department, term)));
         }
 
         if (role.HasValue)
