@@ -9,25 +9,36 @@ API backend (ASP.NET Core Web API, .NET 10) para facilitar as cerimônias de **S
 ## Stack
 
 - .NET 10 / C# · ASP.NET Core Web API com Controllers
-- EF Core 10 + SQLite (`EnsureCreated()`, sem migrations)
+- EF Core 10 + **PostgreSQL** (Npgsql; `EnsureCreated()`, sem migrations)
 - Autenticação JWT stateless (Bearer)
 - Swagger (Swashbuckle 10.x) com esquema `http` / `bearer`
-- Pacotes na linha `10.0.10`; `SQLitePCLRaw.bundle_e_sqlite3` fixado em `3.0.5` (evita o aviso NU1903)
+- Pacotes na linha `10.0.10`; `Npgsql.EntityFrameworkCore.PostgreSQL` na linha `10.0.*`
 - `global.json` pinando o SDK (`10.0.100`, com `rollForward: latestFeature`)
 
-## Como executar
+## Como executar (local)
+
+Precisa de um PostgreSQL. Uma opção rápida com Docker:
+
+```bash
+docker run --name scrumretro-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=scrumretro -p 5432:5432 -d postgres:17
+```
+
+A connection string **não** fica no repositório. Configure-a com user-secrets:
 
 ```bash
 cd ScrumRetroApi
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5432;Database=scrumretro;Username=postgres;Password=postgres"
 dotnet restore
 dotnet build
-dotnet run                      # perfil "http" -> http://localhost:5000 (padrão)
+dotnet run                          # perfil "http" -> http://localhost:5000 (padrão)
 dotnet run --launch-profile https   # perfil opcional -> https://localhost:5001
 ```
 
 - Swagger: `http://localhost:5000/swagger` (habilitado em Development; em outros ambientes use `Swagger:Enabled=true`).
-- O banco `scrumretro.db` é criado automaticamente na primeira execução (`EnsureCreated()`).
-- Se o modelo mudar depois, apague o arquivo `.db` (não há migrations).
+- O schema e o admin inicial são criados automaticamente na primeira execução (`EnsureCreated()`).
+- `EnsureCreated()` **não evolui** o esquema: se o modelo mudar depois, apague/recrie o banco (ou adote migrations).
+- Um `scrumretro.db` (SQLite) de versões anteriores **não é migrado** para o PostgreSQL.
 - Para o HTTPS local: `dotnet dev-certs https --trust`.
 
 ### Autorizar no Swagger
@@ -50,12 +61,47 @@ Se não existir nenhum administrador, um é criado a partir de `appsettings.json
 
 | Chave | Descrição |
 |---|---|
-| `ConnectionStrings:Default` | Arquivo SQLite (padrão `Data Source=scrumretro.db`) |
-| `Jwt:Issuer`, `Jwt:Audience`, `Jwt:Key`, `Jwt:ExpirationMinutes` | JWT. A chave precisa ter ≥ 32 bytes (a aplicação não sobe sem isso) |
+| `ConnectionStrings:Default` | PostgreSQL. **Sem valor padrão** (a aplicação não sobe sem ele). Aceita `Host=...;Database=...;Username=...;Password=...` ou a URL `postgres://usuario:senha@host:5432/banco` do Render |
+| `Jwt:Issuer`, `Jwt:Audience`, `Jwt:Key`, `Jwt:ExpirationMinutes` | JWT. A chave precisa ter ≥ 32 bytes e, fora de Development, **não pode** começar com `TROQUE-ESTA-CHAVE` (a aplicação não sobe) |
 | `Registration:AllowSelfAssignedRoles` | `true` (padrão): cadastro público aceita Member ou Manager. `false`: só Member; Manager/Admin → **403** |
 | `Seed:Admin:*` | Admin inicial |
 | `Cors:AllowedOrigins` | Padrão `http://localhost:4200` (Angular) |
 | `Swagger:Enabled` | Habilita o Swagger fora de Development |
+
+## Deploy gratuito (Render + PostgreSQL)
+
+Backend no Render (Docker, plano **Free**) com Postgres gerenciado; o front Angular fica na Vercel. O filesystem do Render Free é
+efêmero (apagado a cada reinício, deploy ou spin-down), por isso o banco **precisa** ser externo ao container.
+
+1. **Banco:** crie um *PostgreSQL* no Render (plano Free) e copie a **Internal Database URL** (use a interna: o web service e o banco
+   ficam na mesma região). Atenção: o Postgres Free do Render **expira 30 dias após a criação**. Para algo mais duradouro, use um
+   Postgres externo gratuito (Neon, Supabase) com uma URL que termine em `?sslmode=require`.
+2. **Web service:** *New → Web Service* → repositório → **Language/Runtime: Docker** → *Root Directory* = pasta que contém o
+   `Dockerfile` e o `.csproj` → *Instance Type: Free*. **Health Check Path:** `/health`.
+3. **Variáveis de ambiente** (Environment) — nada de segredo no repositório:
+
+| Variável | Valor / observação |
+|---|---|
+| `ASPNETCORE_ENVIRONMENT` | `Production` |
+| `ConnectionStrings__Default` | Internal Database URL do Postgres (formato `postgres://...`) ou connection string Npgsql |
+| `Jwt__Key` | Segredo forte, ≥ 32 caracteres (ex.: `openssl rand -base64 48`). Se ficar o valor de exemplo, a aplicação não sobe |
+| `Seed__Admin__Email` | E-mail do primeiro administrador |
+| `Seed__Admin__Password` | Senha do primeiro administrador (8–100, letras e números). **Troque o padrão do `appsettings.json`** |
+| `Cors__AllowedOrigins__0` | URL do front, **sem barra final** (ex.: `https://meu-app.vercel.app`). Mais origens: `Cors__AllowedOrigins__1`, ... |
+| `Swagger__Enabled` | `false` em produção (use `true` só para testar) |
+
+   A porta (`ASPNETCORE_HTTP_PORTS=10000`) e `DOTNET_gcConcurrent=false` já vêm no `Dockerfile`.
+4. **Acordar o serviço:** o Free dorme após 15 min sem tráfego e leva ~1 min para voltar. Configure um pinger (UptimeRobot,
+   cron-job.org...) fazendo `GET https://<seu-servico>.onrender.com/health` a cada 10 minutos. Um serviço ligado 24 h consome ~720 h
+   das 750 h gratuitas do mês.
+5. **Front (Vercel):** aponte a URL da API do Angular para `https://<seu-servico>.onrender.com/api` (o front hoje usa
+   `core/config/api.config.ts`) e inclua o domínio da Vercel em `Cors__AllowedOrigins__0`.
+6. **Primeiro acesso:** o schema e o admin são criados na primeira inicialização; entre com `Seed__Admin__Email`/`Seed__Admin__Password`.
+
+Observações:
+- O estado do usuário (ativo, papel) é validado a cada requisição com **cache de 30 s**: desativar, rebaixar ou excluir alguém passa a valer em até 30 s.
+- O Render termina o TLS; por isso a aplicação não redireciona HTTP→HTTPS.
+- Não há migrations: mudanças de modelo exigem recriar o banco (dados de teste são perdidos) ou adotar migrations.
 
 ## Convenções
 
@@ -186,7 +232,7 @@ Todo card `ImprovementSuggestion` cria um registro de acompanhamento. Os dois ei
 | Criar card, ver meus cards, ver quadro | ✔ | onde participa | onde participa |
 | Atualizar status de sugestão | ✔ | só onde participa | ✘ |
 
-Além dos atributos `[Authorize]` nos controllers, **os serviços revalidam** papel e participação (defesa em profundidade). Além disso, a cada requisição o JWT é conferido contra o banco: usuário desativado/excluído ou com papel alterado perde o acesso imediatamente, sem esperar o token expirar.
+Além dos atributos `[Authorize]` nos controllers, **os serviços revalidam** papel e participação (defesa em profundidade). Além disso, a cada requisição o JWT é conferido contra o banco: usuário desativado/excluído ou com papel alterado perde o acesso em até 30 s (cache da checagem), sem esperar o token expirar.
 
 ## Estrutura
 
@@ -204,7 +250,7 @@ Middleware/    tratamento global de exceções (JSON padronizado)
 
 - **Admin acessa todos os projetos**, inclusive para criar cards e ver o quadro (continua sem ver autoria).
 - **Manager** só edita/exclui projetos, sprints e status de sugestões onde **participa**; "Admin e Manager podem excluir projetos" foi lido com essa mesma restrição para o Manager.
-- Só pode haver **uma sprint aberta** por projeto: criar a próxima exige encerrar a atual. O `startDate` usa o fuso `Sprints:TimeZoneId` (padrão `America/Sao_Paulo`). Bancos já existentes ganham a coluna `Sprints.StartDate` automaticamente na inicialização. As sugestões "carregadas" são as das sprints de **número menor** que a consultada.
+- Só pode haver **uma sprint aberta** por projeto: criar a próxima exige encerrar a atual. O `startDate` usa o fuso `Sprints:TimeZoneId` (padrão `America/Sao_Paulo`). As sugestões "carregadas" são as das sprints de **número menor** que a consultada.
 - Extras além da lista de rotas (para completar o CRUD de cards e sprints): `GET /api/sprints/{id}`, `PUT/DELETE /api/cards/{cardId}`. Remova se não quiser.
 - Exclusão de usuário é **soft delete**: o e-mail continua reservado; as participações em projetos são removidas; os cards enviados permanecem.
 
@@ -217,9 +263,9 @@ Middleware/    tratamento global de exceções (JSON padronizado)
 1. **Escolha livre de papel no cadastro público.** Com `AllowSelfAssignedRoles=true`, qualquer pessoa na internet vira **Manager** sozinha. Um Manager pode criar projetos e consultar o diretório de usuários (nome e e-mail de todos os ativos). Em produção, prefira `false` (só Member) e promova pessoas via `PUT /api/users/{id}`, ou proteja o cadastro (convite, domínio de e-mail, aprovação).
 2. **Segredos no `appsettings.json`.** A `Jwt:Key` e a senha do admin são apenas valores de desenvolvimento. Troque por variáveis de ambiente/secret manager.
 3. **Sem rate limiting nem bloqueio de tentativas** no login/cadastro. O cadastro retorna 409 para e-mail existente (permite enumerar e-mails). Considere `AddRateLimiter`, lockout e captcha.
-4. **Anonimato é garantido na API, não no banco.** O autor do card existe no banco (necessário para "meus cards"); quem tiver acesso ao SQLite ou a logs de SQL pode rastreá-lo. O quadro omite autoria e data/hora e embaralha a ordem, mas times muito pequenos podem se identificar pelo conteúdo do texto.
+4. **Anonimato é garantido na API, não no banco.** O autor do card existe no banco (necessário para "meus cards"); quem tiver acesso ao banco ou a logs de SQL pode rastreá-lo. O quadro omite autoria e data/hora e embaralha a ordem, mas times muito pequenos podem se identificar pelo conteúdo do texto.
 5. **JWT stateless.** Tokens não são revogáveis individualmente; o risco é mitigado pela checagem de usuário ativo/papel a cada requisição (1 consulta ao banco) e pela expiração curta.
-6. **HTTPS.** Em produção use HTTPS e, se estiver atrás de proxy, configure `ForwardedHeaders`. O redirecionamento HTTPS só é ativado fora de Development.
+6. **HTTPS.** O TLS é terminado pelo proxy do Render; a aplicação não redireciona HTTP→HTTPS. Se precisar de IP/esquema reais do cliente, configure `ForwardedHeaders`.
 7. **CORS** restrito às origens configuradas (`Cors:AllowedOrigins`).
 8. **Sem migrations.** `EnsureCreated()` não evolui o esquema; para produção, adote migrations.
 
@@ -227,11 +273,11 @@ Middleware/    tratamento global de exceções (JSON padronizado)
 
 Nada disso foi compilado. Pontos onde um erro é mais provável:
 
-1. **SDK/versões:** `global.json` usa `10.0.100` com `latestFeature`; ajuste conforme o SDK instalado (`dotnet --list-sdks`). Confirme que as versões `10.0.10` dos pacotes e `SQLitePCLRaw.bundle_e_sqlite3 3.0.5` existem no seu feed e que o NU1903 não reaparece.
+1. **SDK/versões:** `global.json` usa `10.0.100` com `latestFeature`; ajuste conforme o SDK instalado (`dotnet --list-sdks`). Confirme que as versões `10.0.10` dos pacotes e `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.*` existem no seu feed (e fixe a versão resolvida depois).
 2. **Swashbuckle 10.x:** o `.csproj` usa `10.*` (resolve a última 10.x). Confirme que `AddSecurityRequirement(document => ...)` com `OpenApiSecuritySchemeReference("Bearer", document)` compila com a versão resolvida (depende do `Microsoft.OpenApi` 2.x) e que o botão **Authorize** aceita só o token.
 3. **`Program.cs`:** nomes dos setters de `ModelBindingMessageProvider` e a opção `SuppressImplicitRequiredAttributeForNonNullableReferenceTypes`.
 4. **`TokenService`:** uso de `JsonWebTokenHandler` e `MapInboundClaims = false` (claims `sub`/`role`).
-5. **Empresas:** `Common/Cnpj.cs` (CNPJ alfanumérico, ASCII−48; o algoritmo foi conferido com os exemplos oficiais fora do C#) e a migração do banco existente em `DbInitializer` (tabela `Companies` e coluna `Users.CompanyId` via SQL).
-5b. **`ExceptionHandlingMiddleware`:** o padrão de `SqliteException` (`SqliteExtendedErrorCode` 2067/1555) para 409.
+5. **Empresas:** `Common/Cnpj.cs` (CNPJ alfanumérico, ASCII−48; o algoritmo foi conferido com os exemplos oficiais fora do C#) (o schema é criado por `EnsureCreated()` no PostgreSQL).
+5b. **`ExceptionHandlingMiddleware`:** `PostgresException` com `SqlState` 23505 (unicidade) → 409.
 6. **Consultas EF:** projeções com construtores de `record` (`ProjectDto`, `ProjectMemberDto`, `SuggestionTrackingDto`) e filtros por enum convertido para texto. Se algum não for traduzido, o EF lança erro em tempo de execução.
 7. **Teste manual sugerido:** login do admin → criar Manager → criar projeto → inserir membro por e-mail → criar sprint → criar cards → conferir `board` (sem autoria, ordem muda a cada chamada) → criar sprint 2 e conferir `carried-over` → `PATCH` de status → encerrar sprint e tentar criar card (409).
