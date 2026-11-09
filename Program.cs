@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -38,6 +39,7 @@ var connectionString = ConnectionStringHelper.Resolve(builder.Configuration.GetC
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 // ---------- Serviços ----------
+builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddSingleton<ITokenService, TokenService>();
@@ -102,6 +104,8 @@ builder.Services
         options.Events = new JwtBearerEvents
         {
             // Token válido não basta: o usuário precisa continuar ativo e com o mesmo papel.
+            // O estado fica em cache por 30 s (o polling do quadro chama a API a cada poucos segundos), então
+            // desativar/rebaixar/excluir um usuário passa a valer em até 30 s.
             OnTokenValidated = async context =>
             {
                 var sub = context.Principal?.FindFirstValue("sub");
@@ -112,13 +116,20 @@ builder.Services
                     return;
                 }
 
-                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
-                var user = await db.Users.AsNoTracking()
-                    .Where(u => u.Id == userId)
-                    .Select(u => new { u.IsActive, u.IsDeleted, u.Role })
-                    .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+                var services = context.HttpContext.RequestServices;
+                var cache = services.GetRequiredService<IMemoryCache>();
 
-                if (user is null || user.IsDeleted || !user.IsActive || user.Role.ToString() != role)
+                var state = await cache.GetOrCreateAsync($"auth-state:{userId}", async entry =>
+                {
+                    entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30);
+                    var db = services.GetRequiredService<AppDbContext>();
+                    return await db.Users.AsNoTracking()
+                        .Where(u => u.Id == userId)
+                        .Select(u => new UserAuthState(u.IsActive, u.IsDeleted, u.Role))
+                        .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+                });
+
+                if (state is null || state.IsDeleted || !state.IsActive || state.Role.ToString() != role)
                     context.Fail("Sessão inválida.");
             },
             OnChallenge = context =>
