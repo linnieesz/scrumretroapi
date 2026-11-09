@@ -25,8 +25,8 @@ builder.Services.Configure<SeedAdminOptions>(builder.Configuration.GetSection(Se
 builder.Services.Configure<SprintOptions>(builder.Configuration.GetSection(SprintOptions.SectionName));
 
 // ---------- Banco ----------
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=scrumretro.db"));
+var connectionString = ConnectionStringHelper.Resolve(builder.Configuration.GetConnectionString("Default"));
+builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 // ---------- Serviços ----------
 builder.Services.AddHttpContextAccessor();

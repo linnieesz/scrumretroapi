@@ -1,5 +1,5 @@
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using ScrumRetroApi.Common;
 
 namespace ScrumRetroApi.Middleware;
@@ -40,5 +40,5 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>
-        ex.InnerException is SqliteException { SqliteErrorCode: 19, SqliteExtendedErrorCode: 2067 or 1555 };
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 }
