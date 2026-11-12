@@ -2,10 +2,6 @@
 
 API backend (ASP.NET Core Web API, .NET 10) para facilitar as cerimônias de **Sprint Review** e **Retrospectiva** do Scrum.
 
-> **Status de validação:** este projeto foi escrito **sem acesso a um SDK .NET** (o ambiente de geração não tinha `dotnet`).
-> Ele **não foi compilado nem executado**. Antes de usar, rode `dotnet build` e siga a lista da seção
-> [O que validar](#o-que-validar-com-dotnet-build).
-
 ## Stack
 
 - .NET 10 / C# · ASP.NET Core Web API com Controllers
@@ -68,17 +64,6 @@ Se não existir nenhum administrador, um é criado a partir de `appsettings.json
 | `Cors:AllowedOrigins` | Padrão `http://localhost:4200` (Angular) |
 | `Swagger:Enabled` | Habilita o Swagger fora de Development |
 
-## Deploy gratuito (Render + PostgreSQL)
-
-Backend no Render (Docker, plano **Free**) com Postgres gerenciado; o front Angular fica na Vercel. O filesystem do Render Free é
-efêmero (apagado a cada reinício, deploy ou spin-down), por isso o banco **precisa** ser externo ao container.
-
-1. **Banco:** crie um *PostgreSQL* no Render (plano Free) e copie a **Internal Database URL** (use a interna: o web service e o banco
-   ficam na mesma região). Atenção: o Postgres Free do Render **expira 30 dias após a criação**. Para algo mais duradouro, use um
-   Postgres externo gratuito (Neon, Supabase) com uma URL que termine em `?sslmode=require`.
-2. **Web service:** *New → Web Service* → repositório → **Language/Runtime: Docker** → *Root Directory* = pasta que contém o
-   `Dockerfile` e o `.csproj` → *Instance Type: Free*. **Health Check Path:** `/health`.
-3. **Variáveis de ambiente** (Environment) — nada de segredo no repositório:
 
 | Variável | Valor / observação |
 |---|---|
@@ -268,16 +253,3 @@ Middleware/    tratamento global de exceções (JSON padronizado)
 6. **HTTPS.** O TLS é terminado pelo proxy do Render; a aplicação não redireciona HTTP→HTTPS. Se precisar de IP/esquema reais do cliente, configure `ForwardedHeaders`.
 7. **CORS** restrito às origens configuradas (`Cors:AllowedOrigins`).
 8. **Sem migrations.** `EnsureCreated()` não evolui o esquema; para produção, adote migrations.
-
-## O que validar com `dotnet build`
-
-Nada disso foi compilado. Pontos onde um erro é mais provável:
-
-1. **SDK/versões:** `global.json` usa `10.0.100` com `latestFeature`; ajuste conforme o SDK instalado (`dotnet --list-sdks`). Confirme que as versões `10.0.10` dos pacotes e `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.*` existem no seu feed (e fixe a versão resolvida depois).
-2. **Swashbuckle 10.x:** o `.csproj` usa `10.*` (resolve a última 10.x). Confirme que `AddSecurityRequirement(document => ...)` com `OpenApiSecuritySchemeReference("Bearer", document)` compila com a versão resolvida (depende do `Microsoft.OpenApi` 2.x) e que o botão **Authorize** aceita só o token.
-3. **`Program.cs`:** nomes dos setters de `ModelBindingMessageProvider` e a opção `SuppressImplicitRequiredAttributeForNonNullableReferenceTypes`.
-4. **`TokenService`:** uso de `JsonWebTokenHandler` e `MapInboundClaims = false` (claims `sub`/`role`).
-5. **Empresas:** `Common/Cnpj.cs` (CNPJ alfanumérico, ASCII−48; o algoritmo foi conferido com os exemplos oficiais fora do C#) (o schema é criado por `EnsureCreated()` no PostgreSQL).
-5b. **`ExceptionHandlingMiddleware`:** `PostgresException` com `SqlState` 23505 (unicidade) → 409.
-6. **Consultas EF:** projeções com construtores de `record` (`ProjectDto`, `ProjectMemberDto`, `SuggestionTrackingDto`) e filtros por enum convertido para texto. Se algum não for traduzido, o EF lança erro em tempo de execução.
-7. **Teste manual sugerido:** login do admin → criar Manager → criar projeto → inserir membro por e-mail → criar sprint → criar cards → conferir `board` (sem autoria, ordem muda a cada chamada) → criar sprint 2 e conferir `carried-over` → `PATCH` de status → encerrar sprint e tentar criar card (409).
