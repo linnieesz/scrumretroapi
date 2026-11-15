@@ -15,7 +15,8 @@ public static class ConnectionStringHelper
         {
             throw new InvalidOperationException(
                 "ConnectionStrings:Default não configurada. Defina a variável de ambiente ConnectionStrings__Default " +
-                "(ou, em desenvolvimento, use 'dotnet user-secrets set \"ConnectionStrings:Default\" \"...\"').");
+                "(ou DATABASE_URL) ou, em desenvolvimento, use 'dotnet user-secrets set \"ConnectionStrings:Default\" \"...\"' " +
+                "ou um .env.local com DATABASE_URL (gerado por 'neon init').");
         }
 
         var value = raw.Trim();

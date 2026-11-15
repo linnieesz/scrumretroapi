@@ -35,7 +35,16 @@ builder.Services.Configure<SeedAdminOptions>(builder.Configuration.GetSection(Se
 builder.Services.Configure<SprintOptions>(builder.Configuration.GetSection(SprintOptions.SectionName));
 
 // ---------- Banco ----------
-var connectionString = ConnectionStringHelper.Resolve(builder.Configuration.GetConnectionString("Default"));
+// Neon: `neon init`/`neon env pull` gravam DATABASE_URL no .env.local. Em Development ele é lido direto (o .NET não
+// carrega .env sozinho); em produção (Render) defina ConnectionStrings__Default ou DATABASE_URL como variável de ambiente.
+if (builder.Environment.IsDevelopment())
+    DotEnvLoader.AddIfPresent(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env.local"), "DATABASE_URL");
+
+// ConnectionStrings:Default tem prioridade; DATABASE_URL é o fallback (formato postgresql://..., convertido pelo helper).
+var connectionString = ConnectionStringHelper.Resolve(
+    string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Default"))
+        ? builder.Configuration["DATABASE_URL"]
+        : builder.Configuration.GetConnectionString("Default"));
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
 // ---------- Serviços ----------

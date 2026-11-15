@@ -38,6 +38,7 @@ dotnet run --launch-profile https   # perfil opcional -> https://localhost:5001
 - Swagger: `http://localhost:5000/swagger` (habilitado em Development; em outros ambientes use `Swagger:Enabled=true`).
 - O schema e o admin inicial são criados automaticamente na primeira execução (`EnsureCreated()`).
 - `EnsureCreated()` **não evolui** o esquema: se o modelo mudar depois, apague/recrie o banco (ou adote migrations).
+- **Neon (CLI):** `neon init`/`neon env pull` gravam `DATABASE_URL` em `.env.local` na pasta do `.csproj`. Em Development o app lê esse arquivo sozinho (somente a chave `DATABASE_URL`); `.env*` e `.neon` já estão no `.gitignore`.
 - Um `scrumretro.db` (SQLite) de versões anteriores **não é migrado** para o PostgreSQL.
 - Para o HTTPS local: `dotnet dev-certs https --trust`.
 
@@ -84,6 +85,7 @@ efêmero (apagado a cada reinício, deploy ou spin-down), por isso o banco **pre
 |---|---|
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
 | `ConnectionStrings__Default` | Internal Database URL do Postgres (formato `postgres://...`) ou connection string Npgsql |
+| `DATABASE_URL` | Alternativa a `ConnectionStrings__Default` (a CLI da Neon grava esse nome). Se as duas existirem, vale `ConnectionStrings__Default` |
 | `Jwt__Key` | Segredo forte, ≥ 32 caracteres (ex.: `openssl rand -base64 48`). Se ficar o valor de exemplo, a aplicação não sobe |
 | `Seed__Admin__Email` | E-mail do primeiro administrador |
 | `Seed__Admin__Password` | Senha do primeiro administrador (8–100, letras e números). **Troque o padrão do `appsettings.json`** |
