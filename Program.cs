@@ -144,7 +144,25 @@ builder.Services
             OnChallenge = context =>
             {
                 context.HandleResponse();
-                return ApiErrorWriter.WriteAsync(context.HttpContext, 401, "nao_autenticado",
+
+                // Com o FallbackPolicy (exige JWT em tudo), rotas inexistentes e preflight de CORS não atendido também
+                // chegam aqui e antes viravam um 401 enganoso. Agora o diagnóstico fica claro.
+                var http = context.HttpContext;
+                var endpoint = http.GetEndpoint();
+                if (endpoint is null)
+                {
+                    return ApiErrorWriter.WriteAsync(http, 404, "nao_encontrado",
+                        $"Rota não encontrada: {http.Request.Method} {http.Request.Path}. Confira a URL da API (deve terminar em /api).");
+                }
+
+                if (endpoint.DisplayName?.StartsWith("405", StringComparison.Ordinal) == true)
+                {
+                    return ApiErrorWriter.WriteAsync(http, 405, "metodo_nao_permitido",
+                        $"Método {http.Request.Method} não permitido em {http.Request.Path}. " +
+                        "Se a chamada vem do navegador, confira Cors__AllowedOrigins (origem exata do front, sem barra final).");
+                }
+
+                return ApiErrorWriter.WriteAsync(http, 401, "nao_autenticado",
                     "Autenticação necessária ou token inválido/expirado.");
             },
             OnForbidden = context =>
