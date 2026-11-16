@@ -214,6 +214,9 @@ builder.Services.AddSwaggerGen(options =>
 // ---------- Pipeline ----------
 var app = builder.Build();
 
+// Mostra no log do Render exatamente quais origens o CORS aceita (ajuda a achar divergência com a URL do front).
+app.Logger.LogInformation("CORS: origens permitidas = {Origins}", string.Join(", ", allowedOrigins));
+
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 using (var scope = app.Services.CreateScope())
