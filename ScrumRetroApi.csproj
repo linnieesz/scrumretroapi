@@ -10,9 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
-    <!-- PostgreSQL (Npgsql). O Relational fica explícito para manter o EF Core alinhado na linha 10.0.10. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.*" />
+<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.*" />
   </ItemGroup>
 
