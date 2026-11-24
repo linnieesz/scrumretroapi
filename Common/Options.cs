@@ -21,6 +21,12 @@ public sealed class SeedAdminOptions
     public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Recuperação: com true, no startup o administrador configurado (Seed:Admin:Email) é criado OU tem a senha
+    /// redefinida, o papel Admin e o status ativo restaurados. Use uma vez e REMOVA a variável depois.
+    /// </summary>
+    public bool ForceReset { get; set; }
 }
 
 public sealed class SprintOptions

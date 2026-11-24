@@ -1,0 +1,132 @@
+diff --git a/Common/Options.cs b/Common/Options.cs
+index f11f65b..3b47624 100644
+--- a/Common/Options.cs
++++ b/Common/Options.cs
+@@ -21,6 +21,12 @@ public sealed class SeedAdminOptions
+     public string FullName { get; set; } = string.Empty;
+     public string Email { get; set; } = string.Empty;
+     public string Password { get; set; } = string.Empty;
++
++    /// <summary>
++    /// Recuperação: com true, no startup o administrador configurado (Seed:Admin:Email) é criado OU tem a senha
++    /// redefinida, o papel Admin e o status ativo restaurados. Use uma vez e REMOVA a variável depois.
++    /// </summary>
++    public bool ForceReset { get; set; }
+ }
+ 
+ public sealed class SprintOptions
+diff --git a/Data/DbInitializer.cs b/Data/DbInitializer.cs
+index 1369121..ea658f2 100644
+--- a/Data/DbInitializer.cs
++++ b/Data/DbInitializer.cs
+@@ -15,6 +15,13 @@ public static class DbInitializer
+ 
+         await db.Database.EnsureCreatedAsync();
+ 
++        // Recuperação explícita (Seed__Admin__ForceReset=true): garante o admin configurado, mesmo que já exista outro.
++        if (seed.ForceReset)
++        {
++            await ForceResetAdminAsync(db, seed, logger);
++            return;
++        }
++
+         // Só semeia se não existir nenhum administrador (evita recriar um admin removido de propósito).
+         // Atenção: se o MESMO banco já foi usado por outra instância (ex.: sua máquina local), o admin dela vale
+         // e o Seed__Admin__* configurado agora é ignorado, sem erro.
+@@ -25,12 +32,60 @@ public static class DbInitializer
+         if (existingAdmins.Count > 0)
+         {
+             logger.LogInformation(
+-                "Seed do admin ignorado: já existe(m) administrador(es) neste banco: {Emails}. O Seed:Admin atual NÃO altera usuários existentes.",
++                "Seed do admin ignorado: já existe(m) administrador(es) neste banco: {Emails}. O Seed:Admin atual NÃO altera usuários existentes. " +
++                "Para criar/redefinir o admin configurado, defina Seed__Admin__ForceReset=true e reinicie (depois remova a variável).",
+                 string.Join(", ", existingAdmins));
+             return;
+         }
+ 
+         var email = InputRules.NormalizeEmail(seed.Email);
++        if (!IsValid(seed, email, logger)) return;
++
++        if (await db.Users.AnyAsync(u => u.Email == email))
++        {
++            logger.LogWarning(
++                "Seed do admin ignorado: já existe um usuário (não administrador) com o e-mail configurado. " +
++                "Use Seed__Admin__ForceReset=true para promovê-lo e redefinir a senha.");
++            return;
++        }
++
++        db.Users.Add(UserFactory.Create(seed.FullName, email, null, null, null, UserRole.Admin, seed.Password));
++        await db.SaveChangesAsync();
++        logger.LogInformation("Administrador inicial criado: {Email}", email);
++    }
++
++    /// <summary>Cria o admin configurado ou, se o e-mail já existe, redefine senha/papel/status. Nunca registra a senha.</summary>
++    private static async Task ForceResetAdminAsync(AppDbContext db, SeedAdminOptions seed, ILogger logger)
++    {
++        var email = InputRules.NormalizeEmail(seed.Email);
++        if (!IsValid(seed, email, logger)) return;
++
++        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
++        if (user is null)
++        {
++            db.Users.Add(UserFactory.Create(seed.FullName, email, null, null, null, UserRole.Admin, seed.Password));
++            await db.SaveChangesAsync();
++            logger.LogWarning("Seed__Admin__ForceReset ativo: administrador CRIADO ({Email}). REMOVA a variável Seed__Admin__ForceReset.", email);
++            return;
++        }
++
++        var (hash, salt) = PasswordHasher.HashPassword(seed.Password);
++        user.PasswordHash = hash;
++        user.PasswordSalt = salt;
++        user.Role = UserRole.Admin;
++        user.IsActive = true;
++        user.IsDeleted = false;
++        user.DeletedAt = null;
++        user.UpdatedAt = DateTime.UtcNow;
++        await db.SaveChangesAsync();
++
++        logger.LogWarning(
++            "Seed__Admin__ForceReset ativo: administrador REDEFINIDO ({Email}) - senha trocada, papel Admin, conta ativa. " +
++            "REMOVA a variável Seed__Admin__ForceReset (senão a senha volta ao valor da variável a cada reinício).", email);
++    }
++
++    private static bool IsValid(SeedAdminOptions seed, string email, ILogger logger)
++    {
+         var v = new ValidationBuilder();
+         InputRules.FullName(v, seed.FullName);
+         InputRules.Email(v, email);
+@@ -45,20 +100,12 @@ public static class DbInitializer
+                     string.Join(" | ", ex.Errors!.SelectMany(e => e.Value.Select(m => $"{e.Key}: {m}"))));
+             }
+ 
+-            return;
++            return false;
+         }
+ 
+         if (seed.Password != seed.Password.Trim())
+             logger.LogWarning("Seed:Admin:Password tem espaço/quebra de linha no início ou no fim: confira a variável no Render.");
+ 
+-        if (await db.Users.AnyAsync(u => u.Email == email))
+-        {
+-            logger.LogWarning("Seed do admin ignorado: já existe um usuário (não administrador) com o e-mail configurado.");
+-            return;
+-        }
+-
+-        db.Users.Add(UserFactory.Create(seed.FullName, email, null, null, null, UserRole.Admin, seed.Password));
+-        await db.SaveChangesAsync();
+-        logger.LogInformation("Administrador inicial criado: {Email}", email);
++        return true;
+     }
+ }
+diff --git a/README.md b/README.md
+index 2d8d076..738a9a7 100644
+--- a/README.md
++++ b/README.md
+@@ -89,6 +89,7 @@ efêmero (apagado a cada reinício, deploy ou spin-down), por isso o banco **pre
+ | `Jwt__Key` | Segredo forte, ≥ 32 caracteres (ex.: `openssl rand -base64 48`). Se ficar o valor de exemplo, a aplicação não sobe |
+ | `Seed__Admin__Email` | E-mail do primeiro administrador |
+ | `Seed__Admin__Password` | Senha do primeiro administrador (8–100, letras e números). **Troque o padrão do `appsettings.json`** |
++| `Seed__Admin__ForceReset` | **Recuperação.** `true` cria o admin acima ou redefine a senha dele (papel Admin, ativo) no próximo reinício. Use uma vez e **remova** a variável |
+ | `Cors__AllowedOrigins__0` | URL do front, **sem barra final** (ex.: `https://meu-app.vercel.app`). Mais origens: `Cors__AllowedOrigins__1`, ... |
+ | `Swagger__Enabled` | `false` em produção (use `true` só para testar) |
+ 
